@@ -102,12 +102,20 @@ class check_recompletion extends \core\task\scheduled_task {
     protected function reset_completions($userid, $course, $config) {
         global $DB;
         $params = array('userid' => $userid, 'course' => $course->id);
+        $coursecompletions = $DB->get_records('course_completions', $params);
         if ($config->archivecompletiondata) {
-            $coursecompletions = $DB->get_records('course_completions', $params);
             $DB->insert_records('local_recompletion_cc', $coursecompletions);
             $criteriacompletions = $DB->get_records('course_completion_crit_compl', $params);
             $DB->insert_records('local_recompletion_cc_cc', $criteriacompletions);
         }
+
+        /*Trigger the event, so we can log in the logstore_standard_log table*/
+        foreach($coursecompletions as $coursecompletion) {
+            $eventparams = array('context' => \context_course::instance($course->id), 'objectid' => $coursecompletion->id);
+            $event = \local_recompletion\event\course_completion_deleted::create($eventparams);
+            $event->trigger();
+        }
+
         $DB->delete_records('course_completions', $params);
         $DB->delete_records('course_completion_crit_compl', $params);
 
@@ -122,6 +130,25 @@ class check_recompletion extends \core\task\scheduled_task {
             $DB->insert_records('local_recompletion_cmc', $cmc);
         }
         $DB->delete_records_select('course_modules_completion', $selectsql, $params);
+    }
+
+    /**
+     * Reset feedback records.
+     * @param \stdclass $userid - user id
+     * @param \stdClass $course - course record.
+     * @param \stdClass $config - recompletion config.
+     */
+    protected function reset_feedback($userid, $course) {
+        global $DB;
+        //Select all the feedback from this course
+        $feedbacks = $DB->get_records('feedback', ['course' => $course->id]);
+        foreach($feedbacks as $feedback) {
+            $feedback_completed = $DB->get_records('feedback_completed', ['feedback' => $feedback->id, 'userid' => $userid]);
+            $cm = \get_coursemodule_from_instance('feedback', $feedback->id);
+            foreach ($feedback_completed as $fc) {
+                \feedback_delete_completed($fc, $feedback, $cm, $course);
+            }
+        }
     }
 
     /**
@@ -185,6 +212,9 @@ class check_recompletion extends \core\task\scheduled_task {
         global $CFG;
         // Archive and delete course completion.
         $this->reset_completions($userid, $course, $config);
+
+        // Reset feedback
+        $this->reset_feedback($userid, $course);
 
         // Delete current grade information.
         if ($config->deletegradedata) {
