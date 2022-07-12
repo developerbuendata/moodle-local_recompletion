@@ -27,6 +27,8 @@ namespace local_recompletion\task;
 
 defined('MOODLE_INTERNAL') || die();
 
+require_once($CFG->dirroot . '/mod/feedback/lib.php');
+
 /**
  * Check for users that need to recomplete.
  *
